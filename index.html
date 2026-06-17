@@ -218,11 +218,11 @@ window.addEventListener('resize', resizeCanvas);
 
 // --- AUDIO GENERATOR ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let lastJumpSoundTime = 0; 
+let lastJumpSoundTime = 0; // Anti-spam sound timer
 
 function playJumpSound() {
     const now = audioCtx.currentTime;
-    if (now - lastJumpSoundTime < 0.15) return; 
+    if (now - lastJumpSoundTime < 0.15) return; // 150ms cooldown blocks rapid mashing artifacts
     lastJumpSoundTime = now;
 
     if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -275,10 +275,11 @@ let birdY = canvas.height / 2;
 let birdX = canvas.width > 600 ? 250 : 100; 
 let velocity = 0;
 
-const gravity = 0.05;       
-const jumpForce = -2.5;     
-const maxFallSpeed = 3.5;   
-const pipeSpeed = 1.2;      
+// Massively dialed back settings for a 0.8s - 1.0s control loop
+const gravity = 0.05;       // Feather-light gravity
+const jumpForce = -2.5;     // Smooth upward glide
+const maxFallSpeed = 3.5;   // Very casual drifting downward speed
+const pipeSpeed = 1.2;      // Slower pipes to give you time to think
 const birdRadius = 22;      
 
 let pipes = [];
@@ -359,7 +360,7 @@ function startGame() {
 function handleDeath() {
     if (gameState === "DYING" || gameState === "GAMEOVER") return;
     gameState = "DYING";
-    velocity = -1.5; 
+    velocity = -1.5; // Tiny bump
     playGameOverSound();
 
     for (let i = 0; i < 20; i++) {
@@ -390,31 +391,32 @@ function handleJump() {
     }
 }
 
-// Global Keyboard Handler — routes spacebar natively to launch or jump
 document.addEventListener("keydown", (e) => {
     if (e.code === "Space" || e.code === "ArrowUp") {
-        e.preventDefault();
         if (gameState === "PLAYING") {
+            e.preventDefault();
             handleJump();
-        } else if (gameState === "MENU" || gameState === "GAMEOVER") {
-            const isMainOpen = document.getElementById("menu-main").classList.contains("active");
-            const isGameOverOpen = document.getElementById("menu-gameover").classList.contains("active");
-            if (isMainOpen || isGameOverOpen) {
+        } else if (gameState === "MENU") {
+            // Check if the main menu screen is currently viewed
+            if (document.getElementById("menu-main").classList.contains("active")) {
+                e.preventDefault();
+                startGame();
+            }
+        } else if (gameState === "GAMEOVER") {
+            if (document.getElementById("menu-gameover").classList.contains("active")) {
+                e.preventDefault();
                 startGame();
             }
         }
     }
 });
-
 window.addEventListener("mousedown", (e) => {
-    if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
-        if (gameState === "PLAYING") handleJump();
-    }
+    if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') handleJump();
 });
 window.addEventListener("touchstart", (e) => {
     if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
         e.preventDefault();
-        if (gameState === "PLAYING") handleJump();
+        handleJump();
     }
 }, { passive: false });
 
@@ -423,6 +425,7 @@ function spawnPipe() {
     const maxHeight = canvas.height - pipeGap - minHeight;
     const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
     
+    // Core property mapping for custom mechanics
     let pipeObj = {
         x: canvas.width,
         top: topHeight,
@@ -437,33 +440,73 @@ function spawnPipe() {
         arrows: []
     };
 
-    // All distinct structural difficulties launch immediately from the 5th pole onwards
-    if (score >= 5) {
-        // Logarithmic/linear custom scaling curve reaching high chaos at 200-250 poles
-        let diffFactor = Math.min(3.0, (score - 5) / 75); 
+    // Stage 1: 5-14 poles -> Poles move up and down
+    if (score >= 5 && score < 15) {
+        pipeObj.ySpeed = 0.8;
+    } 
+    // Stage 2: 15-24 poles -> Poles move sideways
+    else if (score >= 15 && score < 25) {
+        pipeObj.xSpeed = 0.7;
+    } 
+    // Stage 3: 25-44 poles -> Stones coming from within poles (Up to Down or Down to Up) + Poles moving
+    else if (score >= 25 && score < 45) {
+        pipeObj.ySpeed = 1.0;
+        pipeObj.xSpeed = 0.7;
+        pipeObj.stones.push({
+            y: Math.random() > 0.5 ? 20 : canvas.height - 20,
+            vy: (Math.random() > 0.5 ? 1 : -1) * (1.8 + Math.random() * 1.2),
+            radius: 12
+        });
+    } 
+    // Stage 4: 45-66 poles -> Arrows coming from within the pole + Poles moving
+    else if (score >= 45 && score < 67) {
+        pipeObj.ySpeed = 1.2;
+        pipeObj.xSpeed = 1.0;
+        pipeObj.arrows.push({
+            relativeX: 180, // Track relative horizontal offset to pipe center
+            y: Math.random() * (canvas.height - 240) + 120,
+            vx: -3.8
+        });
+    } 
+    // Stage 5: 67-99 poles -> Stones and Arrows together + Poles moving
+    else if (score >= 67 && score < 100) {
+        pipeObj.ySpeed = 1.4;
+        pipeObj.xSpeed = 1.2;
+        pipeObj.stones.push({
+            y: Math.random() > 0.5 ? 20 : canvas.height - 20,
+            vy: (Math.random() > 0.5 ? 1 : -1) * (2.2 + Math.random() * 1.5),
+            radius: 12
+        });
+        pipeObj.arrows.push({
+            relativeX: 180,
+            y: Math.random() * (canvas.height - 240) + 120,
+            vx: -3.8
+        });
+    } 
+    // Stage 6: 100 onwards -> All features combined + dynamic step adjustments
+    else if (score >= 100) {
+        let diffFactor = Math.min(3.0, (score - 100) / 100); 
         
-        pipeObj.ySpeed = 0.6 + (diffFactor * 1.3);
-        pipeObj.xSpeed = 0.4 + (diffFactor * 1.1);
+        pipeObj.ySpeed = 1.6 + (diffFactor * 1.5);
+        pipeObj.xSpeed = 1.3 + (diffFactor * 1.2);
 
-        // Dynamically scale running stone hazards inside structural paths
-        let stoneCount = Math.floor(1 + (score - 5) / 55);
-        stoneCount = Math.min(4, stoneCount); 
+        // Multiple stones
+        let stoneCount = Math.floor(1 + diffFactor);
         for(let i = 0; i < stoneCount; i++) {
             pipeObj.stones.push({
                 y: Math.random() * canvas.height,
-                vy: (Math.random() > 0.5 ? 1 : -1) * (1.8 + diffFactor * 2.4),
+                vy: (Math.random() > 0.5 ? 1 : -1) * (2.5 + diffFactor * 2.0),
                 radius: 11
             });
         }
 
-        // Dynamically scale rapid automated projectile arrows
-        let arrowCount = Math.floor(1 + (score - 5) / 65);
-        arrowCount = Math.min(4, arrowCount); 
+        // Multiple arrows
+        let arrowCount = Math.floor(1 + diffFactor);
         for(let i = 0; i < arrowCount; i++) {
             pipeObj.arrows.push({
-                relativeX: 160 + (i * 85),
+                relativeX: 150 + (i * 80),
                 y: Math.random() * (canvas.height - 200) + 100,
-                vx: -(3.6 + diffFactor * 3.8)
+                vx: -(4.0 + diffFactor * 3.0)
             });
         }
     }
@@ -552,7 +595,7 @@ function drawBirdStylized(context, x, y, rotation, birdName, isPreview = false) 
     context.arc(eyeOffsetX + 2, eyeOffsetY, eyeSize/2, 0, Math.PI * 2);
     context.fill();
 
-    // 5. Beak
+    // 5. Beak / Nose
     context.fillStyle = colors.beak;
     context.beginPath();
     let beakBaseX = br - 2;
@@ -609,11 +652,12 @@ function update() {
 
         pipeSpawnTimer++;
         
-        // Dynamically accelerate map flow pacing scales from the 5th pole onwards
-        let dynamicMaxSpawn = 260;
-        if (score >= 5) {
-            let scale = Math.min(1.0, (score - 5) / 120);
-            dynamicMaxSpawn = 260 - (scale * 115); 
+        // --- SIDEWAYS SPACING ADJUSTMENT ---
+        // Increased the base horizontal spawning interval from 260 to 400 for more sideways distance between poles
+        let dynamicMaxSpawn = 400;
+        if (score >= 100) {
+            let scale = Math.min(1.0, (score - 100) / 200);
+            dynamicMaxSpawn = 400 - (scale * 120); 
         }
 
         if (pipes.length === 0 || pipeSpawnTimer > dynamicMaxSpawn) { 
@@ -621,15 +665,17 @@ function update() {
             pipeSpawnTimer = 0;
         }
 
+        // Global scroll speed starts increasing gently step-by-step past score 100
         let currentPipeSpeed = pipeSpeed;
-        if (score >= 5) {
-            let scale = Math.min(1.5, (score - 5) / 100);
-            currentPipeSpeed = pipeSpeed + (scale * 1.5);
+        if (score >= 100) {
+            let speedScale = (score - 100) * 0.02; // Steady, micro increments
+            currentPipeSpeed = pipeSpeed + Math.min(3.0, speedScale); // Capped safe max speed increase
         }
 
         pipes.forEach(pipe => {
             pipe.x -= currentPipeSpeed;
 
+            // Handle vertical shifting configurations (Up / Down)
             if (pipe.ySpeed > 0) {
                 pipe.top += pipe.ySpeed * pipe.yDir;
                 if (pipe.top < 60) {
@@ -642,6 +688,7 @@ function update() {
                 pipe.bottom = canvas.height - pipe.top - pipeGap;
             }
 
+            // Handle horizontal side-wise shifting configurations
             if (pipe.xSpeed > 0) {
                 pipe.xOffset += pipe.xSpeed * pipe.xDir;
                 if (Math.abs(pipe.xOffset) > 85) {
@@ -657,6 +704,7 @@ function update() {
                 playPointSound(); 
             }
 
+            // High accuracy collision vectors with shifting base poles
             let closestX = Math.max(renderX, Math.min(birdX, renderX + pipeWidth));
             let closestYTop = Math.max(0, Math.min(birdY, pipe.top));
             let closestYBottom = Math.max(canvas.height - pipe.bottom, Math.min(birdY, canvas.height));
@@ -668,6 +716,7 @@ function update() {
                 handleDeath();
             }
 
+            // Update Stone Positions and Collisions
             pipe.stones.forEach(stone => {
                 stone.y += stone.vy;
                 if (stone.y < 12 || stone.y > canvas.height - 12) {
@@ -681,8 +730,9 @@ function update() {
                 }
             });
 
+            // Update Arrow Positions and Collisions
             pipe.arrows.forEach(arrow => {
-                arrow.relativeX += arrow.vx; 
+                arrow.relativeX += arrow.vx; // Autonomous leftward tracking arrow movement
                 let arrowX = renderX + pipeWidth / 2 + arrow.relativeX;
                 let distX = birdX - arrowX;
                 let distY = birdY - arrow.y;
@@ -741,6 +791,7 @@ function update() {
         ctx.fillRect(renderX - 6, canvas.height - pipe.bottom, pipeWidth + 12, 28);
         ctx.strokeRect(renderX - 6, canvas.height - pipe.bottom, pipeWidth + 12, 28);
 
+        // Render Stones (Score >= 25)
         pipe.stones.forEach(stone => {
             let stoneX = renderX + pipeWidth / 2;
             ctx.fillStyle = "#696969";
@@ -751,12 +802,14 @@ function update() {
             ctx.fill();
             ctx.stroke();
 
+            // Highlight layer for clean 2D stone look
             ctx.fillStyle = "#8a8a8a";
             ctx.beginPath();
             ctx.arc(stoneX - 3, stone.y - 3, stone.radius * 0.4, 0, Math.PI * 2);
             ctx.fill();
         });
 
+        // Render Red Danger Arrows (Score >= 45)
         pipe.arrows.forEach(arrow => {
             let arrowX = renderX + pipeWidth / 2 + arrow.relativeX;
             ctx.fillStyle = "#ff3333";
